@@ -109,8 +109,6 @@ class GTXInit(Module):
         self.comb += Xxphaligndone_rising.eq(Xxphaligndone & ~Xxphaligndone_r)
 
         startup_fsm.act("INITIAL",
-            gtXxreset.eq(1),
-            self.cpllreset.eq(1),
             startup_timer.wait.eq(1),
             If(startup_timer.done & self.stable_clkin, NextState("RESET_PLL"))
         )
@@ -121,7 +119,6 @@ class GTXInit(Module):
             If(pll_reset_timer.done, NextState("RELEASE_PLL_RESET"))
         )
         startup_fsm.act("RELEASE_PLL_RESET",
-            self.cpllreset.eq(0),
             gtXxreset.eq(1),
             If(cplllock, NextState("RESET_GTH"))
         )
