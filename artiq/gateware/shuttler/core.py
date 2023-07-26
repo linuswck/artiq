@@ -135,12 +135,11 @@ class Shuttler(_FMC):
     def io(fmc=0, iostandard=default_iostandard):
         ios = shuttler_fmc_ios.fmc_io_map(fmc, iostandard)
 
-        pp(ios)
-
         return ios
 
     # to be modified
     
+    """
     @classmethod
     def add_std(cls, target, fmc, ttl_out_cls, iostandard=default_iostandard):
         cls.add_extension(target, fmc, fmc_aux, iostandard=iostandard)
@@ -150,6 +149,7 @@ class Shuttler(_FMC):
         # 2. SPI for DAC Config
         # 3. Serdes for DAC
 
+        
         # DAC SPI
         phy = spi2.SPIMaster(
                 target.platform.request("shuttler{}_adc_spi_p".format(fmc))
@@ -169,4 +169,5 @@ class Shuttler(_FMC):
         target.rtio_channels.append(rtio.Channel.from_phy(phy))
         sdr = target.platform.request("shuttler{}_sdr".format(fmc))
         target.specials += DifferentialOutput(1, sdr.p, sdr.n)
+    """
     
