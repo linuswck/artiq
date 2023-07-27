@@ -4,7 +4,7 @@ from migen import *
 from migen.build.generic_platform import *
 
 def default_iostandard():
-    return IOStandard("LVDS_25")
+    return IOStandard("LVCMOS25")
 
 def _fmc_pins(fmc, sigs_names):
     sig_list = sigs_names.split()
@@ -153,7 +153,7 @@ class shuttler_fmc_ios():
         ios += [("shuttler{}_fmc_clk_m2c2".format(fmc), 0, 
             Subsignal("p", Pins(_fmc_pins(fmc, fmc_clk_m2c2["fmc_clk_m2c2"]["Pins"][0]))),
             Subsignal("n", Pins(_fmc_pins(fmc, fmc_clk_m2c2["fmc_clk_m2c2"]["Pins"][1]))),
-            default_iostandard(),
+            IOStandard("LVDS_25"),
             Misc("DIFF_TERM=TRUE")
             )]
     
