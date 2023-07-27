@@ -2,8 +2,10 @@ from migen import *
 from migen.build.generic_platform import *
 from migen.genlib.io import DifferentialOutput
 
+from misoc.cores import gpio
+
 from artiq.gateware import rtio
-from artiq.gateware.rtio.phy import spi2, ad53xx_monitor, dds, grabber
+from artiq.gateware.rtio.phy import spi2, ad53xx_monitor, dds, grabber, ttl_simple
 from artiq.gateware.suservo import servo, pads as servo_pads
 from artiq.gateware.rtio.phy import servo as rtservo, fastino, phaser
 from artiq.gateware.drtio.transceiver import eem_serdes
@@ -139,17 +141,45 @@ class Shuttler(_FMC):
 
     # to be modified
     
-    """
+    
     @classmethod
-    def add_std(cls, target, fmc, ttl_out_cls, iostandard=default_iostandard):
-        cls.add_extension(target, fmc, fmc_aux, iostandard=iostandard)
+    def add_std(cls, target, fmc, iostandard=default_iostandard):
+        cls.add_extension(target, fmc, iostandard=iostandard)
 
         # The following things should be instantiated
         # 1. I2C+GPIO for Clock Startup
         # 2. SPI for DAC Config
         # 3. Serdes for DAC
 
+        #i2c This may be wrong
+        #osc_i2c = target.platform.request("shuttler{}_osc_i2c".format(fmc))     
+        #phy = i2c.I2CMaster(
+        #    target.platform.request("shuttler{}_osc_i2c".format(fmc))
+        #    )
+        #target.submodules += phy
         
+        
+        #target.submodules.osc_i2c = gpio.GPIOTristate([i2c.scl, i2c.sda])
+        #target.csr_devices.append("osc_i2c")
+        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
+        
+        #print(target.csr_devices)
+        pp(dir(target.submodules))
+        pp(target.csr_devices)
+
+        pp(target.config["I2C_BUS_COUNT"])
+        #target.config["I2C_BUS_COUNT"] += 1
+        
+
+        # osc_en
+        #phy = ttl_simple.Output(osc_i2c.en)
+        #target.submodules += phy
+
+        mmcx_osc_sel_n = target.platform.request("shuttler{}_mmcx_osc_sel_n".format(fmc))
+        phy = ttl_simple.Output(mmcx_osc_sel_n)
+        target.submodules += phy
+
+        """
         # DAC SPI
         phy = spi2.SPIMaster(
                 target.platform.request("shuttler{}_adc_spi_p".format(fmc))
@@ -169,5 +199,6 @@ class Shuttler(_FMC):
         target.rtio_channels.append(rtio.Channel.from_phy(phy))
         sdr = target.platform.request("shuttler{}_sdr".format(fmc))
         target.specials += DifferentialOutput(1, sdr.p, sdr.n)
-    """
+        """
+    
     

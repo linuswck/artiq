@@ -74,13 +74,55 @@ mod imp {
             }
 
             if !sda_i(busno) {
+                println!("busno {}", busno);
                 return Err("SDA is stuck low and doesn't get unstuck");
             }
             if !scl_i(busno) {
+                println!("busno {}", busno);
                 return Err("SCL is stuck low and doesn't get unstuck");
             }
             // postcondition: SCL and SDA high
         }
+        Ok(())
+    }
+
+    // In future revision(v1.1) of shuttler board, VADJ can be connected to OSC
+    // Therefore, we should init the onboard io_expander to start VADJ power
+    // Then, init other peripherals
+    pub fn init_single_bus(busno: u8) -> Result<(), &'static str> {
+        if busno as u32 >= csr::CONFIG_I2C_BUS_COUNT {
+            return Err(INVALID_BUS)
+        }
+        
+        let busno = busno as u8;
+        scl_oe(busno, false);
+        sda_oe(busno, false);
+        scl_o(busno, false);
+        sda_o(busno, false);
+
+        // Check the I2C bus is ready
+        half_period();
+        half_period();
+        if !sda_i(busno) {
+            // Try toggling SCL a few times
+            for _bit in 0..8 {
+                scl_oe(busno, true);
+                half_period();
+                scl_oe(busno, false);
+                half_period();
+            }
+        }
+
+        if !sda_i(busno) {
+            println!("busno {}", busno);
+            return Err("SDA is stuck low and doesn't get unstuck");
+        }
+        if !scl_i(busno) {
+            println!("busno {}", busno);
+            return Err("SCL is stuck low and doesn't get unstuck");
+        }
+        // postcondition: SCL and SDA high
+        
         Ok(())
     }
 

@@ -150,10 +150,17 @@ class SatelliteBase(BaseSoC):
         self.add_memory_group("drtioaux_mem", drtioaux_memory_group)
         self.add_csr_group("drtiorep", drtiorep_csr_group)
 
+
+
+        #######################
+        # TO be refactored
+        #######################
+        osc_i2c = self.platform.request("shuttler{}_osc_i2c".format(0))
+
         i2c = self.platform.request("fpga_i2c")
-        self.submodules.i2c = gpio.GPIOTristate([i2c.scl, i2c.sda])
+        self.submodules.i2c = gpio.GPIOTristate([i2c.scl, i2c.sda, osc_i2c.scl, osc_i2c.sda])
         self.csr_devices.append("i2c")
-        self.config["I2C_BUS_COUNT"] = 1
+        self.config["I2C_BUS_COUNT"] = 2
 
         # Enable I2C
         i2c_reset = self.platform.request("i2c_mux_rst_n")
@@ -206,7 +213,13 @@ class Satellite(SatelliteBase):
                 self.comb += led.eq(1)
             else:
                 self.comb += led.eq(0)
+        
+        # Add standard IO
+        Shuttler.add_std(self, 0)
 
+        osc_en = self.platform.request("shuttler{}_osc_i2c_en".format(0), 0)
+        self.comb += osc_en.eq(1)
+        
         self.add_rtio(self.rtio_channels)
 
 

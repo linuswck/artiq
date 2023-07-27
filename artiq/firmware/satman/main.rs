@@ -29,6 +29,40 @@ mod repeater;
 mod dma;
 mod analyzer;
 
+#[cfg(soc_platform = "efc")]
+pub struct Si549 {
+    busno: u8,
+    address: u8
+}
+
+// Reserved not working code
+// cannot receive ack from osc
+#[cfg(soc_platform = "efc")]
+impl Si549 {
+    // need to select the osc before writing anything
+    fn check_identity(&self) -> Result<bool, &'static str> {
+        // Check for ack from io expander
+        i2c::start(self.busno)?;
+        let ack = i2c::write(self.busno, self.address << 1)?;
+        
+        i2c::stop(self.busno)?;
+        Ok(ack)
+    }
+
+    pub fn new() -> Result<Self, &'static str> {
+        let mut si549 = Si549{
+            busno : 1,
+            address : 0x67
+        };
+        if !si549.check_identity()? {
+            println!("Si549 is not found");
+        }
+        Ok(si549)
+    }
+}
+
+
+
 fn drtiosat_reset(reset: bool) {
     unsafe {
         csr::drtiosat::reset_write(if reset { 1 } else { 0 });
@@ -543,8 +577,13 @@ pub extern fn main() -> i32 {
     info!("software ident {}", csr::CONFIG_IDENTIFIER_STR);
     info!("gateware ident {}", ident::read(&mut [0; 64]));
 
-    #[cfg(has_i2c)]
-    i2c::init().expect("I2C initialization failed");
+    //#[cfg(any(has_i2c, not(soc_platform = "efc")))]
+    //i2c::init().expect("I2C initialization failed");
+    
+    // Init the onboard I2C for power startup first
+    //#[cfg(any(has_i2c, soc_platform = "efc"))]
+    i2c::init_single_bus(0).expect("I2C initialization failed");
+
     #[cfg(all(soc_platform = "kasli", hw_rev = "v2.0"))]
     let (mut io_expander0, mut io_expander1);
     #[cfg(all(soc_platform = "kasli", hw_rev = "v2.0"))]
@@ -590,6 +629,12 @@ pub extern fn main() -> i32 {
 
         io_expander.service().unwrap();
         println!("Finishing enabling power for fmc card");
+        
+        clock::spin_us(10_000);
+
+        //i2c::init_single_bus(1).expect("I2C initialization failed");
+        let mut osc = Si549::new().unwrap();
+
         loop {}
         unreachable!()
 
