@@ -38,7 +38,6 @@ mod imp {
         }
     }
 
-
     fn mosi_o(o: bool) {
         unsafe {
             let reg = csr::spi_bit_bang::out_read();
@@ -164,7 +163,7 @@ mod imp {
             sclk_o(true);
         }
 
-        // Release MOSI for slave device to drive data out
+        // Release MOSI for slave device to shift data out
         let mut data: u8 = 0;
         mosi_oe(false);
         sclk_o(false);
@@ -179,7 +178,7 @@ mod imp {
 
         end();
         
-        // Hold MOSI to Low after deassertion of CS_N
+        // Hold MOSI to low after deassertion of CS_N
         mosi_oe(true);
 
         Ok(data)
