@@ -1,15 +1,13 @@
 // SPI Bit Bang Configuration:
-// 3 wire Half Duplex
-// MSB First
-// SPI Mode 0
-// Data width: 8 Bit
+//   Mode 0 (SPI_CLK_POLARITY = 0, SPI_CLK_PHASE = 0)
+//   3 Wire Half Duplex Communication
+//   MSB First
+//   Data width: 8 Bit
 #[cfg(has_spi_bit_bang)]
 mod imp {
-    use board_misoc::csr;
-    use board_misoc::clock;
+    use board_misoc::{csr, clock};
 
     fn half_period() { clock::spin_us(100)}
-    fn quad_period() { clock::spin_us(50)}
     fn mosi_bit() -> u8 { 1 << 2 }
     fn sclk_bit() -> u8 { 1 << 1 }
     fn cs_n_bit() -> u8 { 1 << 0 }
@@ -174,11 +172,9 @@ mod imp {
             sclk_o(true);
         }
 
-        // Release MOSI in middle of SCLK high period
+        // Release MOSI for data read
         let mut data: u8 = 0;
-        quad_period();
         mosi_oe(false);
-        quad_period();
         sclk_o(false);
 
         for bit in (0..8).rev() {
@@ -197,7 +193,7 @@ mod imp {
 
 #[cfg(not(has_spi_bit_bang))]
 mod imp {
-    const NO_SPI_BIT_BANG: &'static str = "No SPI Bit Bang support on this platform";
+    const NO_SPI_BIT_BANG: &'static str = "No SPI Bit Bang supports on this platform";
     pub fn init() -> Result<(), &'static str> { Err(NO_SPI_BIT_BANG) }
     pub fn write(reg_addr: u8, data: u8)-> Result<(), &'static str> { Err(NO_SPI_BIT_BANG) }
     pub fn read(reg_addr: u8) -> Result<u8, &'static str> { Err(NO_SPI_BIT_BANG) }
