@@ -80,26 +80,14 @@ mod imp {
     }
 
     fn start(){
-        mosi_oe(true);
-        sclk_oe(true);
-        cs_n_oe(true);
-
-        mosi_o(false);
-        sclk_o(false);
-        cs_n_o(true);
-
-        half_period();
-        half_period();
-
+        // Pre condition: OE is set to high on CS_N, SCLK, MOSI
+        // Pre Condition: CS_N is driven high. SCLK, MOSI are driven low.
         cs_n_o(false);
         // Post Condition: CS_N, SCLK, MOSI are driven low.
     }
 
     fn end(){
-        mosi_oe(false);
-        sclk_oe(false);
-        cs_n_oe(true);
-
+        // Pre condition: OE is set to high on CS_N, SCLK, MOSI
         mosi_o(false);
         sclk_o(false);
         cs_n_o(true);
@@ -107,32 +95,36 @@ mod imp {
     }
 
     pub fn init() -> Result<(), &'static str> {
+        // Check if CS_N, SCLK, MOSI can be driven high and low.
         cs_n_oe(true);
         cs_n_o(false);
         if cs_n_i(){
             return Err("CS_N is stuck high");
         }
         cs_n_o(true);
+        if !cs_n_i(){
+            return Err("CS_N is stuck low");
+        }
 
         sclk_oe(true);
-        mosi_oe(false);
-        mosi_o(true);
-        // Try toggling sclk and mosi a few times
-        for _bit in 0..8 {
-            sclk_o(true);
-            half_period();
-            sclk_o(false);
-            half_period();
-            mosi_o(!mosi_i());
+        sclk_o(true);
+        if !sclk_i(){
+            return Err("SCLK is stuck low");
         }
+        sclk_o(false);
         if sclk_i(){
             return Err("SCLK is stuck high");
         }
+
+        mosi_oe(true);
+        mosi_o(true);
         if !mosi_i(){
             return Err("MOSI is stuck low");
         }
-
-        end();
+        mosi_o(false);
+        if mosi_i(){
+            return Err("MOSI is stuck high");
+        }
 
         Ok(())
     }
@@ -172,7 +164,7 @@ mod imp {
             sclk_o(true);
         }
 
-        // Release MOSI for data read
+        // Release MOSI for slave device to drive data out
         let mut data: u8 = 0;
         mosi_oe(false);
         sclk_o(false);
@@ -186,6 +178,9 @@ mod imp {
         }
 
         end();
+        
+        // Hold MOSI to Low after deassertion of CS_N
+        mosi_oe(true);
 
         Ok(data)
     }
