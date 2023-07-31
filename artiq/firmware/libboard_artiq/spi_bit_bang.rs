@@ -121,6 +121,10 @@ mod imp {
         cs_n_o(true);
 
         // To-do: Add logic to check if the spi line does not get stuck
+        // Test if the line works as expected
+        // Test 1: push and read the 
+        
+
         half_period();
         half_period();
         
