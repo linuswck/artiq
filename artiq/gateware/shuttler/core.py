@@ -5,7 +5,7 @@ from migen.genlib.io import DifferentialOutput
 from misoc.cores import gpio
 
 from artiq.gateware import rtio
-from artiq.gateware.rtio.phy import spi2, ad53xx_monitor, dds, grabber, ttl_simple
+from artiq.gateware.rtio.phy import  ad53xx_monitor, dds, grabber, ttl_simple
 from artiq.gateware.suservo import servo, pads as servo_pads
 from artiq.gateware.rtio.phy import servo as rtservo, fastino, phaser
 from artiq.gateware.drtio.transceiver import eem_serdes
@@ -151,18 +151,39 @@ class Shuttler(_FMC):
         # 2. SPI for DAC Config
         # 3. Serdes for DAC
 
-        #i2c This may be wrong
-        #osc_i2c = target.platform.request("shuttler{}_osc_i2c".format(fmc))     
-        #phy = i2c.I2CMaster(
-        #    target.platform.request("shuttler{}_osc_i2c".format(fmc))
-        #    )
-        #target.submodules += phy
+        # OSC I2C is placed outside of the function
+        # Set to always enable osc_en 
+        target.submodules.osc_en = gpio.GPIOOut(target.platform.request("shuttler{}_osc_i2c_en".format(fmc)))
+        target.csr_devices.append("osc_en")
+
+        target.submodules.mmcx_osc_sel_n = gpio.GPIOOut(target.platform.request("shuttler{}_mmcx_osc_sel_n".format(fmc)))
+        target.csr_devices.append("mmcx_osc_sel_n")
+
+        target.submodules.ref_clk_sel = gpio.GPIOOut(target.platform.request("shuttler{}_ref_clk_sel".format(fmc)))
+        target.csr_devices.append("ref_clk_sel")
+
+        target.submodules.dac_rst = gpio.GPIOOut(target.platform.request("shuttler{}_dac_rst".format(fmc)))
+        target.csr_devices.append("dac_rst")
         
-        
-        #target.submodules.osc_i2c = gpio.GPIOTristate([i2c.scl, i2c.sda])
-        #target.csr_devices.append("osc_i2c")
-        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
-        
+        target.submodules.dac_sel = gpio.GPIOOut(target.platform.request("shuttler{}_dac_sel".format(fmc)))
+        target.csr_devices.append("dac_sel")
+
+        dac_spi = target.platform.request("shuttler{}_dac_ctrl_spi".format(fmc))
+        target.submodules.spi_bit_bang = gpio.GPIOTristate([dac_spi.cs_n, dac_spi.clk, dac_spi.mosi])
+        target.csr_devices.append("spi_bit_bang")
+        target.config["SPI_BIT_BANG_HALF_DUPLEX"] = 1
+
+
+        #dac_spi_interface = spi.SPIInterface(target.platform.request("shuttler{}_dac_ctrl_spi".format(fmc)))
+        #target.submodules.spi = spi.SPIMaster(dac_spi_interface, data_width=8, div_width=8)
+        #target.csr_devices.append("spi")
+
+
+
+        #osc_en = target.platform.request("shuttler{}_osc_i2c_en".format(0), 0)
+        #target.comb += osc_en.eq(1)
+
+
         #print(target.csr_devices)
         pp(dir(target.submodules))
         pp(target.csr_devices)
@@ -170,14 +191,44 @@ class Shuttler(_FMC):
         pp(target.config["I2C_BUS_COUNT"])
         #target.config["I2C_BUS_COUNT"] += 1
         
-
-        # osc_en
-        #phy = ttl_simple.Output(osc_i2c.en)
+        #pads = target.platform.request("shuttler{}_mmcx_osc_sel_n".format(fmc))
+        #phy = ttl_simple.Output(pads)
         #target.submodules += phy
+        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
 
-        mmcx_osc_sel_n = target.platform.request("shuttler{}_mmcx_osc_sel_n".format(fmc))
-        phy = ttl_simple.Output(mmcx_osc_sel_n)
-        target.submodules += phy
+        #pads = target.platform.request("shuttler{}_ref_clk_sel".format(fmc))
+        #phy = ttl_simple.Output(pads)
+        #target.submodules += phy
+        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
+
+        #pads = target.platform.request("shuttler{}_afe".format(fmc))
+        #phy = ttl_simple.Output(pads)
+        #target.submodules += phy
+        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
+
+        # _fmc_clk_m2c2 to be added Clock diff input pin
+
+        #phy = spi2.SPIMaster(target.platform.request("shuttler{}_dac_ctrl_spi".format(fmc)))
+        #target.submodules += phy
+        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
+        
+        # SPI CS_N, Decoder and reset pin pads
+        #pads = target.platform.request("shuttler{}_dac_sel".format(fmc))
+        #phy = ttl_simple.Output(pads)
+        #target.submodules += phy
+        #target.rtio_channels.append(rtio.Channel.from_phy(phy, ififo_depth=4))
+
+        
+        #dac_din_pads = []
+        #for i in range(8):
+        #    dac_din_pads .a
+        #    pass
+
+
+        # DIN to be added for OSERDES to be added
+
+
+
 
         """
         # DAC SPI

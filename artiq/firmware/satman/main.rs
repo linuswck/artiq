@@ -15,6 +15,7 @@ use board_misoc::{csr, ident, clock, config, uart_logger, i2c, pmp};
 #[cfg(has_si5324)]
 use board_artiq::si5324;
 use board_artiq::{spi, drtioaux};
+use board_artiq::{spi_bit_bang, ad9117};
 use board_artiq::drtio_routing;
 use proto_artiq::drtioaux_proto::ANALYZER_MAX_SIZE;
 use board_artiq::drtio_eem;
@@ -55,7 +56,7 @@ impl Si549 {
             address : 0x67
         };
         if !si549.check_identity()? {
-            println!("Si549 is not found");
+            println!("Si549 is not found. Ignored for now");
         }
         Ok(si549)
     }
@@ -630,10 +631,64 @@ pub extern fn main() -> i32 {
         io_expander.service().unwrap();
         println!("Finishing enabling power for fmc card");
         
-        clock::spin_us(10_000);
+        // Wait for power stage to startup
+        //clock::spin_us(10_000);
 
+        // Enable Oscillator
+        unsafe {csr::osc_en::out_write(1);}
+
+        // Check if Oscillator is presence
+        // TO be uncomment
         //i2c::init_single_bus(1).expect("I2C initialization failed");
-        let mut osc = Si549::new().unwrap();
+        //let mut osc = Si549::new().unwrap();
+
+        // Select to use on-board oscillator as dac ref clock
+        unsafe {csr::mmcx_osc_sel_n::out_write(1);}
+
+        // Select to use on-board oscillator as dac ref clock
+        unsafe {csr::ref_clk_sel::out_write(1);}
+
+        // Wait for clock to propagate
+        //clock::spin_us(1000);
+
+        // Reset all the dac
+        unsafe {csr::dac_rst::out_write(1);}
+        clock::spin_us(1000);
+        unsafe {csr::dac_rst::out_write(0);}
+
+        let dac_spi = board_artiq::ad9117::AD9117::new();
+        
+
+        /* 
+        unsafe {
+            while csr::spi::writable_read() == 0 {};
+            csr::spi::data_write(0x1F);
+        }
+        //spi::write(0, 0x1F);
+
+        unsafe {
+            while csr::spi::writable_read() == 0 {};
+            let result = csr::spi::data_read();
+            println!("hw_rev{}", result);
+            
+            //match spi::read(0) {
+            //    Ok(data) => println!("hw_rev{}", data),
+            //    Err(_) => println!("SPI Error")
+            //}
+        }
+        */
+        //spi::set_config()
+        //spi::write(0, 0x1F);
+        //let result = spi::read(0);
+        //println!("Result{}", result);
+        /* 
+        match csr::spi::data_read(0) {
+            Ok(data) => println!("hw_rev{}", data),
+            Err(_) => println!("SPI Error")
+        }
+        */
+
+
 
         loop {}
         unreachable!()

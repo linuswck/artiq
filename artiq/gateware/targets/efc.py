@@ -217,9 +217,6 @@ class Satellite(SatelliteBase):
         # Add standard IO
         Shuttler.add_std(self, 0)
 
-        osc_en = self.platform.request("shuttler{}_osc_i2c_en".format(0), 0)
-        self.comb += osc_en.eq(1)
-        
         self.add_rtio(self.rtio_channels)
 
 

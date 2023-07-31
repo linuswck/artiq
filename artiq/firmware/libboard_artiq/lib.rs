@@ -33,3 +33,6 @@ pub mod drtio_routing;
 
 #[cfg(has_drtio_eem)]
 pub mod drtio_eem;
+
+pub mod ad9117;
+pub mod spi_bit_bang;

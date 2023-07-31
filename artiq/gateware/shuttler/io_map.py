@@ -4,7 +4,7 @@ from migen import *
 from migen.build.generic_platform import *
 
 def default_iostandard():
-    return IOStandard("LVCMOS25")
+    return IOStandard("LVCMOS18")
 
 def _fmc_pins(fmc, sigs_names):
     sig_list = sigs_names.split()
@@ -107,11 +107,15 @@ class shuttler_fmc_ios():
             default_iostandard()
             )]
 
-        ios += [("shuttler{}_dac_ctrl".format(fmc), 0,
-            Subsignal("reset", Pins(_fmc_pins(fmc, dac_ctrl["reset"]["Pins"]))),
-            Subsignal("cs_sel", Pins(_fmc_pins(fmc, dac_ctrl["spi"]["cs_a"]["Pins"]))),
-            default_iostandard()
-            )]
+        ios += [("shuttler{}_dac_sel".format(fmc), 0, Pins(_fmc_pins(fmc, dac_ctrl["spi"]["cs_a"]["Pins"])), default_iostandard())]
+
+        #    Subsignal("reset", Pins(_fmc_pins(fmc, dac_ctrl["reset"]["Pins"]))),
+        #    Subsignal("cs_sel", Pins(_fmc_pins(fmc, dac_ctrl["spi"]["cs_a"]["Pins"]))),
+            
+        #    default_iostandard()
+        #    )]
+        
+        ios += [("shuttler{}_dac_rst".format(fmc), 0, Pins(_fmc_pins(fmc, dac_ctrl["reset"]["Pins"])), default_iostandard())]
 
         # Temporarily change name to get it compile
         ios += [("user_led", 0, Pins(_fmc_pins(fmc, led["led0_g"]["Pins"])), IOStandard("LVCMOS18")),
@@ -138,22 +142,22 @@ class shuttler_fmc_ios():
         ios += [("shuttler{}_osc_i2c".format(fmc), 0,
             Subsignal("sda", Pins(_fmc_pins(fmc, osc["osc_sda"]["Pins"]))),
             Subsignal("scl", Pins(_fmc_pins(fmc, osc["osc_scl"]["Pins"]))),
-            IOStandard("LVCMOS18")
+            default_iostandard()
             )]
         # Shuttler rev 1.0 tie 1V8 onto this line
         ios += [("shuttler{}_osc_i2c_en".format(fmc), 0,
             Pins(_fmc_pins(fmc, osc["osc_en"]["Pins"])),
-            IOStandard("LVCMOS18")
+            default_iostandard()
             )]
 
         ios += [("shuttler{}_mmcx_osc_sel_n".format(fmc), 0, 
             Pins(_fmc_pins(fmc, mmcx_osc_sel_n["mmcx_osc_sel_n"]["Pins"])),
-            IOStandard("LVCMOS18")
+            default_iostandard()
             )]
 
         ios += [("shuttler{}_ref_clk_sel".format(fmc), 0, 
             Pins(_fmc_pins(fmc, ref_clk_sel["ref_clk_sel"]["Pins"])),
-            IOStandard("LVCMOS18")
+            default_iostandard()
             )]
 
         ios += [("shuttler{}_fmc_clk_m2c2".format(fmc), 0, 
