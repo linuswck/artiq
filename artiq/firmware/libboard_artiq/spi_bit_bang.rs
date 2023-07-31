@@ -3,12 +3,10 @@
 // MSB First
 // SPI Mode 0
 // Data width: 8 Bit
-
+#[cfg(has_spi_bit_bang)]
 mod imp {
     use board_misoc::csr;
     use board_misoc::clock;
-
-    const NO_SPI: &'static str = "No I2C support on this platform";
 
     fn half_period() { clock::spin_us(100)}
     fn quad_period() { clock::spin_us(50)}
@@ -96,6 +94,7 @@ mod imp {
         half_period();
 
         cs_n_o(false);
+        // Post Condition: CS_N, SCLK, MOSI are driven low.
     }
 
     fn end(){
@@ -106,29 +105,37 @@ mod imp {
         mosi_o(false);
         sclk_o(false);
         cs_n_o(true);
+        // Post Condition: CS_N is driven high. MOSI and SCLK are floated
     }
 
     pub fn init() -> Result<(), &'static str> {
-        if csr::CONFIG_SPI_BIT_BANG_HALF_DUPLEX != 1{
-            return Err("Only SPI Half Duplex Mode is supported");
-        }
-        
-        mosi_oe(false);
-        sclk_oe(false);
         cs_n_oe(true);
-
-        mosi_o(false);
-        sclk_o(false);
+        cs_n_o(false);
+        if cs_n_i(){
+            return Err("CS_N is stuck high");
+        }
         cs_n_o(true);
 
-        // To-do: Add logic to check if the spi line does not get stuck
-        // Test if the line works as expected
-        // Test 1: push and read the 
-        
+        sclk_oe(true);
+        mosi_oe(false);
+        mosi_o(true);
+        // Try toggling sclk and mosi a few times
+        for _bit in 0..8 {
+            sclk_o(true);
+            half_period();
+            sclk_o(false);
+            half_period();
+            mosi_o(!mosi_i());
+        }
+        if sclk_i(){
+            return Err("SCLK is stuck high");
+        }
+        if !mosi_i(){
+            return Err("MOSI is stuck low");
+        }
 
-        half_period();
-        half_period();
-        
+        end();
+
         Ok(())
     }
 
@@ -167,6 +174,7 @@ mod imp {
             sclk_o(true);
         }
 
+        // Release MOSI in middle of SCLK high period
         let mut data: u8 = 0;
         quad_period();
         mosi_oe(false);
@@ -185,6 +193,14 @@ mod imp {
 
         Ok(data)
     }
+}
+
+#[cfg(not(has_spi_bit_bang))]
+mod imp {
+    const NO_SPI_BIT_BANG: &'static str = "No SPI Bit Bang support on this platform";
+    pub fn init() -> Result<(), &'static str> { Err(NO_SPI_BIT_BANG) }
+    pub fn write(reg_addr: u8, data: u8)-> Result<(), &'static str> { Err(NO_SPI_BIT_BANG) }
+    pub fn read(reg_addr: u8) -> Result<u8, &'static str> { Err(NO_SPI_BIT_BANG) }
 }
 
 pub use self::imp::*;

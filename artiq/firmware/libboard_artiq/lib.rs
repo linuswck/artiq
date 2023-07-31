@@ -35,4 +35,6 @@ pub mod drtio_routing;
 pub mod drtio_eem;
 
 pub mod ad9117;
+
+#[cfg(has_spi_bit_bang)]
 pub mod spi_bit_bang;
