@@ -1,4 +1,5 @@
-// Half Duplex SPI Bit Bang Soft Core
+// SPI Bit Bang Configuration:
+// 3 wire Half Duplex
 // MSB First
 // SPI Mode 0
 // Data width: 8 Bit
@@ -11,13 +12,13 @@ mod imp {
 
     fn half_period() { clock::spin_us(100)}
     fn quad_period() { clock::spin_us(50)}
-    fn miso_bit() -> u8 { 1 << 2 }
+    fn mosi_bit() -> u8 { 1 << 2 }
     fn sclk_bit() -> u8 { 1 << 1 }
     fn cs_n_bit() -> u8 { 1 << 0 }
 
-    fn miso_i() -> bool {
+    fn mosi_i() -> bool {
         unsafe {
-            csr::spi_bit_bang::in_read() & miso_bit() != 0
+            csr::spi_bit_bang::in_read() & mosi_bit() != 0
         }
     }
     
@@ -33,19 +34,19 @@ mod imp {
         }
     }
 
-    fn miso_oe(oe: bool) {
+    fn mosi_oe(oe: bool) {
         unsafe {
             let reg = csr::spi_bit_bang::oe_read();
-            let reg = if oe { reg | miso_bit() } else { reg & !miso_bit() };
+            let reg = if oe { reg | mosi_bit() } else { reg & !mosi_bit() };
             csr::spi_bit_bang::oe_write(reg)
         }
     }
 
 
-    fn miso_o(o: bool) {
+    fn mosi_o(o: bool) {
         unsafe {
             let reg = csr::spi_bit_bang::out_read();
-            let reg = if o  { reg | miso_bit() } else { reg & !miso_bit() };
+            let reg = if o  { reg | mosi_bit() } else { reg & !mosi_bit() };
             csr::spi_bit_bang::out_write(reg)
         }
     }
@@ -83,11 +84,11 @@ mod imp {
     }
 
     fn start(){
-        miso_oe(true);
+        mosi_oe(true);
         sclk_oe(true);
         cs_n_oe(true);
 
-        miso_o(false);
+        mosi_o(false);
         sclk_o(false);
         cs_n_o(true);
 
@@ -98,11 +99,11 @@ mod imp {
     }
 
     fn end(){
-        miso_oe(false);
+        mosi_oe(false);
         sclk_oe(false);
         cs_n_oe(true);
 
-        miso_o(false);
+        mosi_o(false);
         sclk_o(false);
         cs_n_o(true);
     }
@@ -112,11 +113,11 @@ mod imp {
             return Err("Only SPI Half Duplex Mode is supported");
         }
         
-        miso_oe(false);
+        mosi_oe(false);
         sclk_oe(false);
         cs_n_oe(true);
 
-        miso_o(false);
+        mosi_o(false);
         sclk_o(false);
         cs_n_o(true);
 
@@ -135,7 +136,7 @@ mod imp {
         start();
         
         for bit in (0..8).rev() {
-            miso_o(!(reg_addr & (1 << bit) == 0));
+            mosi_o(!(reg_addr & (1 << bit) == 0));
             half_period();
             sclk_o(false);
             half_period();
@@ -143,7 +144,7 @@ mod imp {
         }
 
         for bit in (0..8).rev() {
-            miso_o(!(data & (1 << bit) == 0));
+            mosi_o(!(data & (1 << bit) == 0));
             half_period();
             sclk_o(false);
             half_period();
@@ -159,7 +160,7 @@ mod imp {
         start();
 
         for bit in (0..8).rev() {
-            miso_o(!(reg_addr & (1 << bit) == 0));
+            mosi_o(!(reg_addr & (1 << bit) == 0));
             half_period();
             sclk_o(false);
             half_period();
@@ -168,14 +169,14 @@ mod imp {
 
         let mut data: u8 = 0;
         quad_period();
-        miso_oe(false);
+        mosi_oe(false);
         quad_period();
         sclk_o(false);
 
         for bit in (0..8).rev() {
             half_period();
             sclk_o(true);
-            if miso_i() { data |= 1 << bit }
+            if mosi_i() { data |= 1 << bit }
             half_period();
             sclk_o(false);
         }
