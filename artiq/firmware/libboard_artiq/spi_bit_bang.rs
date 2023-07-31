@@ -44,10 +44,8 @@ mod imp {
 
     fn miso_o(o: bool) {
         unsafe {
-            println!("Set miso_o to {}", o);
             let reg = csr::spi_bit_bang::out_read();
             let reg = if o  { reg | miso_bit() } else { reg & !miso_bit() };
-            println!("reg o {}", reg);
             csr::spi_bit_bang::out_write(reg)
         }
     }
@@ -62,10 +60,8 @@ mod imp {
 
     fn sclk_o(o: bool) {
         unsafe {
-            println!("Set sclk to {}", o);
             let reg = csr::spi_bit_bang::out_read();
             let reg = if o  { reg | sclk_bit() } else { reg & !sclk_bit() };
-            println!("reg o {}", reg);
             csr::spi_bit_bang::out_write(reg)
         }
     }
@@ -80,10 +76,8 @@ mod imp {
 
     fn cs_n_o(o: bool) {
         unsafe {
-            println!("Set cs_n to {}", o);
             let reg = csr::spi_bit_bang::out_read();
             let reg = if o  { reg | cs_n_bit() } else { reg & !cs_n_bit() };
-            println!("reg o {}", reg);
             csr::spi_bit_bang::out_write(reg)
         }
     }
