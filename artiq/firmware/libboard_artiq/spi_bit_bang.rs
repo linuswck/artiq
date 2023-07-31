@@ -1,6 +1,3 @@
-
-
-
 // Half Duplex SPI Bit Bang Soft Core
 // MSB First
 // SPI Mode 0
@@ -14,8 +11,6 @@ mod imp {
 
     fn half_period() { clock::spin_us(100)}
     fn quad_period() { clock::spin_us(50)}
-    // option if not half duplex
-    //fn mosi_bit() -> u8 (1 << 3)
     fn miso_bit() -> u8 { 1 << 2 }
     fn sclk_bit() -> u8 { 1 << 1 }
     fn cs_n_bit() -> u8 { 1 << 0 }
@@ -93,55 +88,45 @@ mod imp {
         }
     }
 
-    fn test(){
-
-    }
-
-    fn start() -> Result<(), &'static str>{
-        println!("SPI Start");
-
+    fn start(){
         miso_oe(true);
         sclk_oe(true);
         cs_n_oe(true);
-        cs_n_o(false);
 
-        half_period();
-        half_period();
-
+        miso_o(false);
+        sclk_o(false);
         cs_n_o(true);
 
         half_period();
         half_period();
 
         cs_n_o(false);
-
-        Ok(())
     }
 
-    fn end()-> Result<(), &'static str>{
-        miso_o(false);
+    fn end(){
         miso_oe(false);
+        sclk_oe(false);
+        cs_n_oe(true);
+
+        miso_o(false);
+        sclk_o(false);
         cs_n_o(true);
-
-        println!("SPI End");
-
-        Ok(())
     }
 
     pub fn init() -> Result<(), &'static str> {
-        if csr::CONFIG_SPI_BIT_BANG_HALF_DUPLEX == 1{
+        if csr::CONFIG_SPI_BIT_BANG_HALF_DUPLEX != 1{
             return Err("Only SPI Half Duplex Mode is supported");
         }
         
         miso_oe(false);
-        sclk_oe(true);
+        sclk_oe(false);
         cs_n_oe(true);
-        
+
         miso_o(false);
-        sclk_o(true);
+        sclk_o(false);
         cs_n_o(true);
 
-        // Check the I2C bus is ready
+        // To-do: Add logic to check if the spi line does not get stuck
         half_period();
         half_period();
         
@@ -152,7 +137,7 @@ mod imp {
         start();
         
         for bit in (0..8).rev() {
-            miso_o(reg_addr & (1 << bit) == 0);
+            miso_o(!(reg_addr & (1 << bit) == 0));
             half_period();
             sclk_o(false);
             half_period();
@@ -160,7 +145,7 @@ mod imp {
         }
 
         for bit in (0..8).rev() {
-            miso_o(data & (1 << bit) == 0);
+            miso_o(!(data & (1 << bit) == 0));
             half_period();
             sclk_o(false);
             half_period();
@@ -172,19 +157,9 @@ mod imp {
         Ok(())
     }
 
-    pub fn read(reg_addr: u8) -> u8 {
-    //pub fn read(reg_addr: u8) -> Result<u8, &'static str> {
-
-        println!("reg_addr {}", reg_addr);
-
+    pub fn read(reg_addr: u8) -> Result<u8, &'static str> {
         start();
 
-        unsafe{
-            let reg = csr::spi_bit_bang::oe_read();
-            println!("oe value befiore read {}:", reg);
-        }
-        
-        println!("instruction byte");
         for bit in (0..8).rev() {
             miso_o(!(reg_addr & (1 << bit) == 0));
             half_period();
@@ -199,7 +174,6 @@ mod imp {
         quad_period();
         sclk_o(false);
 
-        println!("read data byte");
         for bit in (0..8).rev() {
             half_period();
             sclk_o(true);
@@ -210,20 +184,8 @@ mod imp {
 
         end();
 
-        return data;
-
-        //return Ok(data);
+        Ok(data)
     }
-
 }
-
-/* 
-mod imp {
-    const NO_SPI_BIT_BANG: &'static str = "No SPI BIT BANG support on this platform";
-    pub fn init() -> Result<(), &'static str> { Err(NO_SPI_BIT_BANG) }
-    pub fn write(_reg_addr: u8, _data: u8) -> Result<bool, &'static str> { Err(NO_SPI_BIT_BANG) }
-    pub fn read(_reg_addr: u8) -> Result<u8, &'static str> { Err(NO_SPI_BIT_BANG) }
-}
-*/
 
 pub use self::imp::*;
