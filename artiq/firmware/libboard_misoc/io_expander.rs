@@ -104,7 +104,6 @@ impl IoExpander {
         if !io_expander.check_ack()? {
             return Err("MCP23017 not found.");
             };
-        }
         Ok(io_expander)
     }
 
