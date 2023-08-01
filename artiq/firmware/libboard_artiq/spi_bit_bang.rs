@@ -223,8 +223,8 @@ mod imp {
         }
         half_period();
         sclk_o(false);
-        // post condition: OE for CS_N, SCLK and MOSI high
-        // post condition: CS_N low and SCLK low | MOSI don't care
+        // postcondition: OE for CS_N, SCLK and MOSI high
+        // postcondition: CS_N low and SCLK low | MOSI don't care
 
         Ok(())
     }
