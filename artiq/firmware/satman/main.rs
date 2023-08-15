@@ -17,6 +17,7 @@ use board_artiq::si5324;
 use board_artiq::{spi, drtioaux};
 use board_artiq::drtio_routing;
 use proto_artiq::drtioaux_proto::ANALYZER_MAX_SIZE;
+use board_artiq::drtio_eem;
 use riscv::register::{mcause, mepc, mtval};
 use dma::Manager as DmaManager;
 use analyzer::Analyzer;
@@ -529,11 +530,27 @@ pub extern fn main() -> i32 {
 
     sysclk_setup();
 
+    #[cfg(soc_platform = "efc")]
+    {
+        let mut io_expander = board_misoc::io_expander::IoExpander::new().unwrap();
+        // Enable VADJ and P3V3_FMC
+        io_expander.set_oe(1, 1 << 0 | 1 << 1).unwrap();
+
+        io_expander.set(1, 0, true);
+        io_expander.set(1, 1, true);
+
+        io_expander.service().unwrap();
+    }
+
+    #[cfg(not(has_drtio_eem))]
     unsafe {
         csr::drtio_transceiver::txenable_write(0xffffffffu32 as _);
     }
 
     init_rtio_crg();
+
+    #[cfg(has_drtio_eem)]
+    drtio_eem::init();
 
     #[cfg(has_drtio_routing)]
     let mut repeaters = [repeater::Repeater::default(); csr::DRTIOREP.len()];
