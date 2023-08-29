@@ -18,6 +18,9 @@ from artiq.gateware.drtio.rx_synchronizer import NoRXSynchronizer
 from artiq.gateware.drtio import *
 from artiq.build_soc import *
 
+# To be refractored
+from artiq.gateware.shuttler.core import Shuttler
+from misoc.interconnect.csr import *
 
 class Satellite(BaseSoC, AMPSoC):
     mem_map = {
@@ -126,7 +129,7 @@ class Satellite(BaseSoC, AMPSoC):
                 Subsignal('dclkio', Pins('fmc0:LA01_CC_P')),
                 IOStandard('LVCMOS18')),
             ('dac_din', 4,
-                Subsignal('data', Pins('fmc0:HA22_N fmc0:HA19_N fmc0:HA22_P fmc0:HA21_N fmc0:HA21_P fmc0:HA19_P fmc0:HA18_N fmc0:HA20_N fmc0:HA20_P fmc0:HA18_P fmc0:HA15_N fmc0:HA15_P fmc0:HA16_N fmc0:HA16_P')),
+                Subsignal('data', Pins('fmc0:HA22_N fmc0:HA19_N fmc0:HA22_P fmc0:HA21_N fmc0:HA21_P fmc0:HA19_P fmc0:HA18_CC_N fmc0:HA20_N fmc0:HA20_P fmc0:HA18_CC_P fmc0:HA15_N fmc0:HA15_P fmc0:HA16_N fmc0:HA16_P')),
                 Subsignal('dclkio', Pins('fmc0:HA17_CC_P')),
                 IOStandard('LVCMOS18')),
             ('dac_din', 5,
@@ -141,6 +144,8 @@ class Satellite(BaseSoC, AMPSoC):
                 Subsignal('data', Pins('fmc0:HB13_N fmc0:HB12_N fmc0:HB13_P fmc0:HB12_P fmc0:HB15_N fmc0:HB15_P fmc0:HB11_N fmc0:HB09_N fmc0:HB09_P fmc0:HB14_N fmc0:HB14_P fmc0:HB10_N fmc0:HB10_P fmc0:HB11_P')),
                 Subsignal('dclkio', Pins('fmc0:HB06_CC_P')),
                 IOStandard('LVCMOS18')),
+            ('mmcx_osc_sel_n', 0, Pins('fmc0:HB17_CC_N'), IOStandard('LVCMOS18')),
+            ('ref_clk_sel', 0, Pins('fmc0:LA32_N'), IOStandard('LVCMOS18')),
         ]
 
         platform.add_extension(shuttler_io)
@@ -149,10 +154,21 @@ class Satellite(BaseSoC, AMPSoC):
         self.csr_devices.append("converter_spi")
         self.config["HAS_CONVERTER_SPI"] = None
 
-        dac_rst = self.platform.request('dac_rst')
-        self.comb += dac_rst.eq(0)
+        self.submodules.dac_rst = gpio.GPIOOut(self.platform.request("dac_rst"))
+        self.csr_devices.append("dac_rst")
 
-        self.rtio_channels = []
+        self.submodules.mmcx_osc_sel_n = gpio.GPIOOut(self.platform.request("mmcx_osc_sel_n"))
+        self.csr_devices.append("mmcx_osc_sel_n")
+
+        self.submodules.ref_clk_sel = gpio.GPIOOut(self.platform.request("ref_clk_sel"))
+        self.csr_devices.append("ref_clk_sel")
+
+        dac_din_ios = []
+        dac_din_ios += [ platform.request("dac_din", i) for i in range(8) ]
+        self.submodules.shuttler = Shuttler(dac_din_ios)
+        self.csr_devices.append("shuttler")
+
+        self.rtio_channels = [] 
 
         for i in range(2):
             phy = ttl_simple.Output(self.virtual_leds.get(i))

@@ -572,6 +572,200 @@ pub extern fn main() -> i32 {
     let mut rank = 1;
 
     let mut hardware_tick_ts = 0;
+    /* 
+    unsafe{
+        info!("DAC CLK use onboard oscillator");
+        csr::mmcx_osc_sel_n::out_write(1);
+        csr::ref_clk_sel::out_write(1);
+    }
+    */
+    unsafe{
+        info!("Use FMC Clock");
+        csr::mmcx_osc_sel_n::out_write(1);
+        csr::ref_clk_sel::out_write(0);
+    }
+
+    clock::spin_us(1000);
+    unsafe{
+        info!("Enable all dclk");
+        csr::shuttler::dclk_en_write(0xFF);
+    }
+    clock::spin_us(5000);
+
+    unsafe {
+        info!("DAC Hard Reset");
+        csr::dac_rst::out_write(0);
+        clock::spin_us(100);
+        csr::dac_rst::out_write(1);
+        clock::spin_us(100);
+        csr::dac_rst::out_write(0);
+    }
+
+    let flags = 0;
+
+    unsafe{
+        while csr::converter_spi::idle_read() == 0 {}
+        csr::converter_spi::offline_write(0);
+        csr::converter_spi::end_write(0);
+        // 0b_ _ _ 0 to sel dac
+        csr::converter_spi::cs_polarity_write(0b0000);
+        csr::converter_spi::clk_polarity_write(0);
+        csr::converter_spi::clk_phase_write(0);
+        csr::converter_spi::lsb_first_write(0);
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::length_write(8 - 1);
+        csr::converter_spi::div_write(64 - 2);
+        csr::converter_spi::cs_write(0b0001);
+    }
+
+    //spi::set_config(0, flags, length, div, cs).unwrap();
+    // Instruction byte to read HW Rev register
+    clock::spin_us(100);
+    unsafe{
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::data_write(0x9F << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(1);
+        csr::converter_spi::data_write(0x00);
+    }
+
+    //spi::write(0, 0x1FFF << 16).unwrap();
+    clock::spin_us(100);
+    let things_read = spi::read(0).unwrap();
+    info!("Rev num is {:02x}", things_read);
+
+    /*
+    clock::spin_us(100);
+    // Set Soft reset high
+    unsafe{
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x00 << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::data_write(0x20);
+    }
+    clock::spin_us(100);
+    // Set Soft reset low
+    unsafe{
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x00 << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::data_write(0x00);
+    }
+    info!("Finish soft reset");
+     */
+    
+    info!("Edge Trigger CLKMODE for retiming");
+     
+    unsafe {
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x94 << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::data_write(0xCB << 24);
+    }
+
+    unsafe{
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x94 << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::data_write(0xC3 << 24);
+    }
+    
+    clock::spin_us(100);
+    unsafe{
+        info!("Set AUX CTL I IAUXEN to be high");
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x0A << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::data_write(0x80 << 24);
+    }
+    clock::spin_us(100);
+    unsafe{
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x8A << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(1);
+        csr::converter_spi::data_write(0x00);
+        let things_read = spi::read(0).unwrap();
+        info!("AUX CTL I reg is {:02x}", things_read);
+        info!("Read AUX CTL I IAUXEN");
+    }
+    clock::spin_us(100);
+    unsafe{
+        info!("Set AUX CTL Q QAUXEN to be high");
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x0C << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::data_write(0x80 << 24);
+    }
+    clock::spin_us(100);
+    unsafe{
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::half_duplex_write(0);
+        csr::converter_spi::end_write(0);
+        csr::converter_spi::data_write(0x8C << 24);
+        while csr::converter_spi::writable_read() == 0 {}
+        csr::converter_spi::end_write(1);
+        csr::converter_spi::half_duplex_write(1);
+        csr::converter_spi::data_write(0x00);
+        let things_read = spi::read(0).unwrap();
+        info!("AUX CTL Q reg is {:02x}", things_read);
+    }
+    clock::spin_us(100);
+    info!("The end of code segment is reached.");
+
+    loop {
+        // Read by the retiming resistor
+
+        unsafe{
+            csr::shuttler::din_data_test_write(0x00);
+        }
+        clock::spin_us(1_000_000);
+        unsafe{
+            while csr::converter_spi::writable_read() == 0 {}
+            csr::converter_spi::half_duplex_write(0);
+            csr::converter_spi::end_write(0);
+            csr::converter_spi::data_write(0x94 << 24);
+            while csr::converter_spi::writable_read() == 0 {}
+            csr::converter_spi::end_write(1);
+            csr::converter_spi::half_duplex_write(1);
+            csr::converter_spi::data_write(0x00);
+        }
+        let things_read = spi::read(0).unwrap();
+        info!("CLKMODE reg is {:02x}", things_read);
+
+        unsafe{
+            csr::shuttler::din_data_test_write(0xFFFF);
+        }
+        clock::spin_us(1_000_000);
+    }
+    unreachable!();
+
 
     loop {
         while !drtiosat_link_rx_up() {
