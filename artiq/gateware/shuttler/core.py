@@ -14,7 +14,7 @@ class Shuttler(Module, AutoCSR):
 
         for i, din in enumerate(dac_din_pads):
             # To be removed: AD917 Clock Frequency 125MHz
-            self.specials += DDROutput(1, 0, din.dclkio, ClockSignal())
+            self.specials += DDROutput(1, 0, din.clk, ClockSignal())
             for bit in range(bit_width):
                 self.specials += DDROutput(self.din[i][0][bit], self.din[i][1][bit], din.data[bit], ClockSignal())
 
