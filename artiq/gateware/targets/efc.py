@@ -144,8 +144,6 @@ class Satellite(BaseSoC, AMPSoC):
                 Subsignal('data', Pins('fmc0:HB13_N fmc0:HB12_N fmc0:HB13_P fmc0:HB12_P fmc0:HB15_N fmc0:HB15_P fmc0:HB11_N fmc0:HB09_N fmc0:HB09_P fmc0:HB14_N fmc0:HB14_P fmc0:HB10_N fmc0:HB10_P fmc0:HB11_P')),
                 Subsignal('clk', Pins('fmc0:HB06_CC_P')),
                 IOStandard('LVCMOS18')),
-            ('mmcx_osc_sel_n', 0, Pins('fmc0:HB17_CC_N'), IOStandard('LVCMOS18')),
-            ('ref_clk_sel', 0, Pins('fmc0:LA32_N'), IOStandard('LVCMOS18')),
         ]
 
         platform.add_extension(shuttler_io)
