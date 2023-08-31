@@ -658,6 +658,7 @@ pub extern fn main() -> i32 {
         }
 
         //Power-Down Reg
+        /* 
         unsafe {
             while csr::converter_spi::writable_read() == 0 {}
             csr::converter_spi::half_duplex_write(0);
@@ -667,7 +668,7 @@ pub extern fn main() -> i32 {
             csr::converter_spi::end_write(1);
             csr::converter_spi::data_write(0b10000001 << 24);
         }
-        
+        */
         // Data Control
         /* 
         unsafe {
