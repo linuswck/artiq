@@ -19,8 +19,87 @@ from operator import add
 from migen import *
 from misoc.interconnect.stream import Endpoint
 from misoc.cores.cordic import Cordic
+from misoc.interconnect.csr import *
+from migen.genlib.cdc import MultiReg
 from artiq.gateware.rtio import rtlink
 
+class Dac_Interface(Module, AutoCSR):
+    def __init__(self, pads, bit_width=14):
+        self.data = [[Signal(bit_width) for _ in range(2)] for _ in range(8)]
+        dac_clk_en = Signal(8)
+        self.clk_en = CSRStorage(8)
+        self.ready = CSRStorage()
+
+        self.phase_shift = CSR()
+        self.phase_shift_done = CSRStatus(reset=1)
+
+        mmcm_ps_fb = Signal()
+        mmcm_ps_output = Signal()
+        mmcm_ps_psdone = Signal()
+
+        # Generate DAC DDR CLK
+        # 125MHz to 125MHz with controllable phase shift,
+        # VCO @ 1000MHz.
+        # Phase is 45 degree by default
+        self.specials += \
+            Instance("MMCME2_ADV",
+                p_CLKIN1_PERIOD=8.0,
+                i_CLKIN1=ClockSignal(),
+                i_RST=ResetSignal(),
+                i_CLKINSEL=1, 
+
+                p_CLKFBOUT_MULT_F=8.0,
+                p_CLKOUT0_DIVIDE_F=8.0,
+                p_DIVCLK_DIVIDE=1,
+                p_CLKOUT0_PHASE=45.0,
+
+                o_CLKFBOUT=mmcm_ps_fb, i_CLKFBIN=mmcm_ps_fb,
+
+                p_CLKOUT0_USE_FINE_PS="TRUE",
+                o_CLKOUT0=mmcm_ps_output,
+
+                i_PSCLK=ClockSignal(),
+                i_PSEN=self.phase_shift.re,
+                i_PSINCDEC=self.phase_shift.r,
+                o_PSDONE=mmcm_ps_psdone,
+            )
+
+        self.sync += [
+            If(self.phase_shift.re, self.phase_shift_done.status.eq(0)),
+            If(mmcm_ps_psdone, self.phase_shift_done.status.eq(1))
+        ]
+
+        self.clock_domains.cd_dac_ddr = ClockDomain()
+        self.specials += [
+            Instance("BUFG", i_I=mmcm_ps_output, o_O=self.cd_dac_ddr.clk),
+            MultiReg(self.clk_en.storage, dac_clk_en, "dac_ddr")
+        ]
+
+        for i, din in enumerate(pads):
+            self.specials += Instance("ODDR", 
+                    i_C=self.cd_dac_ddr.clk, 
+                    i_CE=dac_clk_en[i], 
+                    i_D1=1, 
+                    i_D2=0, 
+                    o_Q=din.clk,
+                    p_DDR_CLK_EDGE="SAME_EDGE")
+            self.specials += [
+                Instance("ODDR", 
+                    i_C=ClockSignal(), 
+                    i_CE=self.ready.storage[0], 
+                    i_D1=self.data[i][0][bit], # DDR CLK Rising Edge
+                    i_D2=self.data[i][1][bit], # DDR CLK Falling Edge
+                    o_Q=din.data[bit],
+                    p_DDR_CLK_EDGE="SAME_EDGE") 
+                for bit in range(bit_width)]
+
+        # To be removed: before pushing
+        self.din_data_test = CSRStorage(14, reset=0x5555)
+        for i in range(8):
+            # Channel I
+            self.comb += self.data[i][0].eq(self.din_data_test.storage)
+            # Channel Q
+            self.comb += self.data[i][1].eq(self.din_data_test.storage)
 
 class Dac(Module):
     """Output module.

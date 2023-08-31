@@ -15,6 +15,9 @@ use board_misoc::{csr, ident, clock, uart_logger, i2c, pmp};
 #[cfg(has_si5324)]
 use board_artiq::si5324;
 use board_artiq::{spi, drtioaux};
+
+use board_artiq::ad9117;
+
 use board_artiq::drtio_routing;
 use proto_artiq::drtioaux_proto::ANALYZER_MAX_SIZE;
 #[cfg(has_drtio_eem)]
@@ -573,140 +576,8 @@ pub extern fn main() -> i32 {
 
     let mut hardware_tick_ts = 0;
 
-    unsafe{
-        info!("Use FMC Clock");
-        csr::mmcx_osc_sel_n::out_write(1);
-        csr::ref_clk_sel::out_write(0);
-    }
-
-    clock::spin_us(1000);
-    unsafe{
-        info!("Enable all dclk");
-        csr::shuttler::din_dclk_en_test_write(0xFF);
-    }
-
-    clock::spin_us(5000);
-    unsafe {
-        info!("DAC Hard Reset");
-        csr::dac_rst::out_write(0);
-        clock::spin_us(100);
-        csr::dac_rst::out_write(1);
-        clock::spin_us(100);
-        csr::dac_rst::out_write(0);
-    }
-
-    let flags = 0;
-
-    unsafe{
-        while csr::converter_spi::idle_read() == 0 {}
-        csr::converter_spi::offline_write(0);
-        csr::converter_spi::end_write(0);
-        // 0b_ _ _ 0 to sel dac
-        csr::converter_spi::cs_polarity_write(0b0000);
-        csr::converter_spi::clk_polarity_write(0);
-        csr::converter_spi::clk_phase_write(0);
-        csr::converter_spi::lsb_first_write(0);
-        csr::converter_spi::half_duplex_write(0);
-        csr::converter_spi::length_write(8 - 1);
-        csr::converter_spi::div_write(64 - 2);
-        csr::converter_spi::cs_write(0b0001);
-    }
-
-    // Instruction byte to read HW Rev register
-    clock::spin_us(100);
-    unsafe{
-        while csr::converter_spi::writable_read() == 0 {}
-        csr::converter_spi::data_write(0x9F << 24);
-        while csr::converter_spi::writable_read() == 0 {}
-        csr::converter_spi::end_write(1);
-        csr::converter_spi::half_duplex_write(1);
-        csr::converter_spi::data_write(0x00);
-    }
-
-    //spi::write(0, 0x1FFF << 16).unwrap();
-    clock::spin_us(100);
-    let things_read = spi::read(0).unwrap();
-    info!("Rev num is {:02x}", things_read);
+    ad9117::init().unwrap();
     
-    info!("Edge Trigger CLKMODE for retiming");
-    unsafe {
-        while csr::converter_spi::writable_read() == 0 {}
-        csr::converter_spi::half_duplex_write(0);
-        csr::converter_spi::end_write(0);
-        csr::converter_spi::data_write(0x94 << 24);
-        while csr::converter_spi::writable_read() == 0 {}
-        csr::converter_spi::end_write(1);
-        csr::converter_spi::data_write(0xCB << 24);
-    }
-
-    unsafe{
-        while csr::converter_spi::writable_read() == 0 {}
-        csr::converter_spi::half_duplex_write(0);
-        csr::converter_spi::end_write(0);
-        csr::converter_spi::data_write(0x94 << 24);
-        while csr::converter_spi::writable_read() == 0 {}
-        csr::converter_spi::end_write(1);
-        csr::converter_spi::data_write(0xC3 << 24);
-    }
-
-    info!("Turn off internal reference to use external reference");
-    //info!("Use CLKIN port to feed the DCLKIO");
-    info!("Then, use internal resistor for IRSET and QRESET and set the current output to 20mA");
-    for channel in 0..8 {
-        unsafe{
-            csr::converter_spi::cs_polarity_write(0b0000 | channel << 1);
-        }
-
-        //Power-Down Reg
-        /* 
-        unsafe {
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::half_duplex_write(0);
-            csr::converter_spi::end_write(0);
-            csr::converter_spi::data_write(0x01 << 24);
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::end_write(1);
-            csr::converter_spi::data_write(0b10000001 << 24);
-        }
-        */
-        // Data Control
-        /* 
-        unsafe {
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::half_duplex_write(0);
-            csr::converter_spi::end_write(0);
-            csr::converter_spi::data_write(0x02 << 24);
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::end_write(1);
-            csr::converter_spi::data_write(0b10110000 << 24);
-        }
-        
-
-        // IRSET 
-        unsafe {
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::half_duplex_write(0);
-            csr::converter_spi::end_write(0);
-            csr::converter_spi::data_write(0x04 << 24);
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::end_write(1);
-            csr::converter_spi::data_write(0b10100000 << 24);
-        }
-
-        // QRSET 
-        unsafe {
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::half_duplex_write(0);
-            csr::converter_spi::end_write(0);
-            csr::converter_spi::data_write(0x07 << 24);
-            while csr::converter_spi::writable_read() == 0 {}
-            csr::converter_spi::end_write(1);
-            csr::converter_spi::data_write(0b10100000 << 24);
-        }
-        */
-    }
-    
-    clock::spin_us(100);
     info!("The end of code segment is reached.");
 
     loop {
@@ -732,16 +603,10 @@ pub extern fn main() -> i32 {
         
 
         unsafe{
-            csr::shuttler::din_data_test_write(0x0000);
+            csr::dac_interface::din_data_test_write(0x0000);
             clock::spin_us(1_000_000);
 
-            csr::shuttler::din_data_test_write(0x7FFF);
-            clock::spin_us(1_000_000);
-            
-            csr::shuttler::din_data_test_write(0xBFFF);
-            clock::spin_us(1_000_000);
-
-            csr::shuttler::din_data_test_write(0xFFFF);
+            csr::dac_interface::din_data_test_write(0x00FF);
             clock::spin_us(1_000_000);
         }
     }

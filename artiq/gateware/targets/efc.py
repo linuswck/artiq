@@ -16,12 +16,8 @@ from artiq.gateware.rtio.phy import ttl_simple
 from artiq.gateware.drtio.transceiver import eem_serdes
 from artiq.gateware.drtio.rx_synchronizer import NoRXSynchronizer
 from artiq.gateware.drtio import *
-from artiq.gateware.shuttler import Shuttler
+from artiq.gateware.shuttler import Shuttler, Dac_Interface
 from artiq.build_soc import *
-
-# To be refractored
-from artiq.gateware.shuttler.core import Shuttler
-from misoc.interconnect.csr import *
 
 class Satellite(BaseSoC, AMPSoC):
     mem_map = {
@@ -156,16 +152,12 @@ class Satellite(BaseSoC, AMPSoC):
         self.submodules.dac_rst = gpio.GPIOOut(self.platform.request("dac_rst"))
         self.csr_devices.append("dac_rst")
 
-        self.submodules.mmcx_osc_sel_n = gpio.GPIOOut(self.platform.request("mmcx_osc_sel_n"))
-        self.csr_devices.append("mmcx_osc_sel_n")
-
-        self.submodules.ref_clk_sel = gpio.GPIOOut(self.platform.request("ref_clk_sel"))
-        self.csr_devices.append("ref_clk_sel")
-
         dac_din_ios = []
         dac_din_ios += [ platform.request("dac_din", i) for i in range(8) ]
-        self.submodules.shuttler = Shuttler(dac_din_ios)
-        self.csr_devices.append("shuttler")
+        self.submodules.dac_interface = Dac_Interface(dac_din_ios)
+        self.csr_devices.append("dac_interface")
+        platform.add_period_constraint(self.dac_interface.cd_dac_ddr.clk, 8.0)
+        platform.add_false_path_constraints(self.crg.cd_sys.clk, self.dac_interface.cd_dac_ddr.clk)
 
         self.rtio_channels = [] 
 
