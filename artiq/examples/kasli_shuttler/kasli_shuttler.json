@@ -2,11 +2,11 @@
     "target": "kasli",
     "variant": "master",
     "hw_rev": "v2.0",
-    "base": "master",
+    "drtio_role": "master",
     "peripherals": [
         {
             "type": "shuttler",
-                "ports": [0]
+            "ports": [0]
         },
         {
             "type": "dio",
