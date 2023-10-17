@@ -83,10 +83,9 @@ impl IoExpander {
 
     #[cfg(soc_platform = "efc")]
     pub fn new() -> Result<Self, &'static str> {
-        // TODO: Put Virtual User LEDs L0 L1 in gateware
         const VIRTUAL_LED_MAPPING: [(u8, u8, u8); 2] = [(0, 0, 5), (1, 0, 6)];
 
-        let mut io_expander = IoExpander {
+        let io_expander = IoExpander {
             busno: 0,
             port: 1,
             address: 0x40,

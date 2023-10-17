@@ -91,6 +91,10 @@
           sha256 = "1y27vz6jq6sywas07kz3v01sqjd0sga9yv9w2cksqac3v7wmf2a0";
         };
         prePatch = "echo ${version} > RELEASE-VERSION";
+        postPatch = ''
+          substituteInPlace OutputCheck/Driver.py \
+            --replace "argparse.FileType('rU')" "argparse.FileType('r')"
+        '';
       };
 
       libartiq-support = pkgs.stdenv.mkDerivation {
@@ -190,6 +194,8 @@
       migen = pkgs.python3Packages.buildPythonPackage rec {
         name = "migen";
         src = src-migen;
+        format = "pyproject";
+        nativeBuildInputs = [ pkgs.python3Packages.setuptools ];
         propagatedBuildInputs = [ pkgs.python3Packages.colorama ];
       };
 
@@ -275,16 +281,20 @@
             '';
           installPhase =
             ''
-            TARGET_DIR=$out
-            mkdir -p $TARGET_DIR
-            cp artiq_${target}/${variant}/gateware/top.bit $TARGET_DIR
+            mkdir $out
+            cp artiq_${target}/${variant}/gateware/top.bit $out
             if [ -e artiq_${target}/${variant}/software/bootloader/bootloader.bin ]
-            then cp artiq_${target}/${variant}/software/bootloader/bootloader.bin $TARGET_DIR
+            then cp artiq_${target}/${variant}/software/bootloader/bootloader.bin $out
             fi
             if [ -e artiq_${target}/${variant}/software/runtime ]
-            then cp artiq_${target}/${variant}/software/runtime/runtime.{elf,fbi} $TARGET_DIR
-            else cp artiq_${target}/${variant}/software/satman/satman.{elf,fbi} $TARGET_DIR
+            then cp artiq_${target}/${variant}/software/runtime/runtime.{elf,fbi} $out
+            else cp artiq_${target}/${variant}/software/satman/satman.{elf,fbi} $out
             fi
+
+            mkdir $out/nix-support
+            for i in $out/*.*; do
+            echo file binary-dist $i >> $out/nix-support/hydra-build-products
+            done
             '';
           # don't mangle ELF files as they are not for NixOS
           dontFixup = true;
@@ -353,6 +363,10 @@
         artiq-board-kc705-nist_clock = makeArtiqBoardPackage {
           target = "kc705";
           variant = "nist_clock";
+        };
+        artiq-board-efc-shuttler = makeArtiqBoardPackage {
+          target = "efc";
+          variant = "shuttler";
         };
         inherit sphinxcontrib-wavedrom latex-artiq-manual;
         artiq-manual-html = pkgs.stdenvNoCC.mkDerivation rec {
@@ -453,7 +467,7 @@
       };
 
       hydraJobs = {
-        inherit (packages.x86_64-linux) artiq artiq-board-kc705-nist_clock openocd-bscanspi;
+        inherit (packages.x86_64-linux) artiq artiq-board-kc705-nist_clock artiq-board-efc-shuttler openocd-bscanspi;
         gateware-sim = pkgs.stdenvNoCC.mkDerivation {
           name = "gateware-sim";
           buildInputs = [

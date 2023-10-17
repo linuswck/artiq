@@ -5,6 +5,7 @@ the references to the host objects and translates the functions
 annotated as ``@kernel`` when they are referenced.
 """
 
+import typing
 import os, re, linecache, inspect, textwrap, types as pytypes, numpy
 from collections import OrderedDict, defaultdict
 
@@ -17,6 +18,13 @@ from ..language import core as language_core
 from . import types, builtins, asttyped, math_fns, prelude
 from .transforms import ASTTypedRewriter, Inferencer, IntMonomorphizer, TypedtreePrinter
 from .transforms.asttyped_rewriter import LocalExtractor
+
+try:
+    # From numpy=1.25.0 dispatching for `__array_function__` is done via
+    # a C wrapper: https://github.com/numpy/numpy/pull/23020
+    from numpy.core._multiarray_umath import _ArrayFunctionDispatcher
+except ImportError:
+    _ArrayFunctionDispatcher = None    
 
 
 class SpecializedFunction:
@@ -45,7 +53,14 @@ class EmbeddingMap:
         self.object_forward_map = {}
         self.object_reverse_map = {}
         self.module_map = {}
+
+        # type_map connects the host Python `type` to the pair of associated
+        # `(TInstance, TConstructor)`s. The `used_…_names` sets cache the
+        # respective `.name`s for O(1) collision avoidance.
         self.type_map = {}
+        self.used_instance_type_names = set()
+        self.used_constructor_type_names = set()
+
         self.function_map = {}
         self.str_forward_map = {}
         self.str_reverse_map = {}
@@ -59,7 +74,9 @@ class EmbeddingMap:
                                                   "CacheError",
                                                   "SPIError",
                                                   "0:ZeroDivisionError",
-                                                  "0:IndexError"])
+                                                  "0:IndexError",
+                                                  "UnwrapNoneError",
+                                                  "SubkernelError"])
 
     def preallocate_runtime_exception_names(self, names):
         for i, name in enumerate(names):
@@ -91,16 +108,6 @@ class EmbeddingMap:
 
     # Types
     def store_type(self, host_type, instance_type, constructor_type):
-        self._rename_type(instance_type)
-        self.type_map[host_type] = (instance_type, constructor_type)
-
-    def retrieve_type(self, host_type):
-        return self.type_map[host_type]
-
-    def has_type(self, host_type):
-        return host_type in self.type_map
-
-    def _rename_type(self, new_instance_type):
         # Generally, user-defined types that have exact same name (which is to say, classes
         # defined inside functions) do not pose a problem to the compiler. The two places which
         # cannot handle this are:
@@ -109,12 +116,29 @@ class EmbeddingMap:
         # Since handling #2 requires renaming on ARTIQ side anyway, it's more straightforward
         # to do it once when embedding (since non-embedded code cannot define classes in
         # functions). Also, easier to debug.
-        n = 0
-        for host_type in self.type_map:
-            instance_type, constructor_type = self.type_map[host_type]
-            if instance_type.name == new_instance_type.name:
-                n += 1
-                new_instance_type.name = "{}.{}".format(new_instance_type.name, n)
+        suffix = 0
+        new_instance_name = instance_type.name
+        new_constructor_name = constructor_type.name
+        while True:
+            if (new_instance_name not in self.used_instance_type_names
+                    and new_constructor_name not in self.used_constructor_type_names):
+                break
+            suffix += 1
+            new_instance_name = f"{instance_type.name}.{suffix}"
+            new_constructor_name = f"{constructor_type.name}.{suffix}"
+
+        self.used_instance_type_names.add(new_instance_name)
+        instance_type.name = new_instance_name
+        self.used_constructor_type_names.add(new_constructor_name)
+        constructor_type.name = new_constructor_name
+
+        self.type_map[host_type] = (instance_type, constructor_type)
+
+    def retrieve_type(self, host_type):
+        return self.type_map[host_type]
+
+    def has_type(self, host_type):
+        return host_type in self.type_map
 
     def attribute_count(self):
         count = 0
@@ -161,7 +185,15 @@ class EmbeddingMap:
                 obj_typ, _ = self.type_map[type(obj_ref)]
             yield obj_id, obj_ref, obj_typ
 
-    def has_rpc(self):
+    def subkernels(self):
+        subkernels = {}
+        for k, v in self.object_forward_map.items():
+            if hasattr(v, "artiq_embedded"):
+                if v.artiq_embedded.destination is not None:
+                    subkernels[k] = v
+        return subkernels
+
+    def has_rpc_or_subkernel(self):
         return any(filter(lambda x: inspect.isfunction(x) or inspect.ismethod(x),
                           self.object_forward_map.values()))
 
@@ -336,7 +368,9 @@ class ASTSynthesizer:
         elif inspect.isfunction(value) or inspect.ismethod(value) or \
                 isinstance(value, pytypes.BuiltinFunctionType) or \
                 isinstance(value, SpecializedFunction) or \
-                isinstance(value, numpy.ufunc):
+                isinstance(value, numpy.ufunc) or \
+                (isinstance(value, _ArrayFunctionDispatcher) if 
+                            _ArrayFunctionDispatcher is not None else False):
             if inspect.ismethod(value):
                 quoted_self   = self.quote(value.__self__)
                 function_type = self.quote_function(value.__func__, self.expanded_from)
@@ -445,7 +479,7 @@ class ASTSynthesizer:
                 return asttyped.QuoteT(value=value, type=instance_type,
                                        loc=loc)
 
-    def call(self, callee, args, kwargs, callback=None):
+    def call(self, callee, args, kwargs, callback=None, remote_fn=False):
         """
         Construct an AST fragment calling a function specified by
         an AST node `function_node`, with given arguments.
@@ -489,7 +523,7 @@ class ASTSynthesizer:
             starargs=None, kwargs=None,
             type=types.TVar(), iodelay=None, arg_exprs={},
             begin_loc=begin_loc, end_loc=end_loc, star_loc=None, dstar_loc=None,
-            loc=callee_node.loc.join(end_loc))
+            loc=callee_node.loc.join(end_loc), remote_fn=remote_fn)
 
         if callback is not None:
             node = asttyped.CallT(
@@ -524,7 +558,7 @@ class StitchingASTTypedRewriter(ASTTypedRewriter):
                              arg=node.arg, annotation=None,
                              arg_loc=node.arg_loc, colon_loc=node.colon_loc, loc=node.loc)
 
-    def visit_quoted_function(self, node, function):
+    def visit_quoted_function(self, node, function, remote_fn):
         extractor = LocalExtractor(env_stack=self.env_stack, engine=self.engine)
         extractor.visit(node)
 
@@ -541,11 +575,11 @@ class StitchingASTTypedRewriter(ASTTypedRewriter):
         node = asttyped.QuotedFunctionDefT(
             typing_env=extractor.typing_env, globals_in_scope=extractor.global_,
             signature_type=types.TVar(), return_type=types.TVar(),
-            name=node.name, args=node.args, returns=node.returns,
+            name=node.name, args=node.args, returns=None,
             body=node.body, decorator_list=node.decorator_list,
             keyword_loc=node.keyword_loc, name_loc=node.name_loc,
             arrow_loc=node.arrow_loc, colon_loc=node.colon_loc, at_locs=node.at_locs,
-            loc=node.loc)
+            loc=node.loc, remote_fn=remote_fn)
 
         try:
             self.env_stack.append(node.typing_env)
@@ -753,7 +787,7 @@ class TypedtreeHasher(algorithm.Visitor):
         return hash(tuple(freeze(getattr(node, field_name)) for field_name in fields))
 
 class Stitcher:
-    def __init__(self, core, dmgr, engine=None, print_as_rpc=True):
+    def __init__(self, core, dmgr, engine=None, print_as_rpc=True, destination=0, subkernel_arg_types=[]):
         self.core = core
         self.dmgr = dmgr
         if engine is None:
@@ -779,11 +813,19 @@ class Stitcher:
         self.value_map = defaultdict(lambda: [])
         self.definitely_changed = False
 
+        self.destination = destination
+        self.first_call = True
+        # for non-annotated subkernels: 
+        # main kernel inferencer output with types of arguments
+        self.subkernel_arg_types = subkernel_arg_types
+
     def stitch_call(self, function, args, kwargs, callback=None):
         # We synthesize source code for the initial call so that
         # diagnostics would have something meaningful to display to the user.
         synthesizer = self._synthesizer(self._function_loc(function.artiq_embedded.function))
-        call_node = synthesizer.call(function, args, kwargs, callback)
+        # first call of a subkernel will get its arguments from remote (DRTIO)
+        remote_fn = self.destination != 0
+        call_node = synthesizer.call(function, args, kwargs, callback, remote_fn=remote_fn)
         synthesizer.finalize()
         self.typedtree.append(call_node)
 
@@ -895,6 +937,10 @@ class Stitcher:
                 return [diagnostic.Diagnostic("note",
                     "in kernel function here", {},
                     call_loc)]
+            elif fn_kind == 'subkernel':
+                return [diagnostic.Diagnostic("note",
+                    "in subkernel call here", {},
+                    call_loc)]
             else:
                 assert False
         else:
@@ -914,7 +960,7 @@ class Stitcher:
                 self._function_loc(function),
                 notes=self._call_site_note(loc, fn_kind))
             self.engine.process(diag)
-        elif fn_kind == 'rpc' and param.default is not inspect.Parameter.empty:
+        elif fn_kind == 'rpc' or fn_kind == 'subkernel' and param.default is not inspect.Parameter.empty:
             notes = []
             notes.append(diagnostic.Diagnostic("note",
                 "expanded from here while trying to infer a type for an"
@@ -933,11 +979,18 @@ class Stitcher:
                 Inferencer(engine=self.engine).visit(ast)
                 IntMonomorphizer(engine=self.engine).visit(ast)
                 return ast.type
-        else:
-            # Let the rest of the program decide.
-            return types.TVar()
+        elif fn_kind == 'kernel' and self.first_call and self.destination != 0:
+            # subkernels do not have access to the main kernel code to infer
+            # arg types - so these are cached and passed onto subkernel
+            # compilation, to avoid having to annotate them fully
+            for name, typ in self.subkernel_arg_types:
+                if param.name == name:
+                    return typ
 
-    def _quote_embedded_function(self, function, flags):
+        # Let the rest of the program decide.
+        return types.TVar()
+
+    def _quote_embedded_function(self, function, flags, remote_fn=False):
         # we are now parsing new functions... definitely changed the type
         self.definitely_changed = True
 
@@ -1036,7 +1089,7 @@ class Stitcher:
             engine=self.engine, prelude=self.prelude,
             globals=self.globals, host_environment=host_environment,
             quote=self._quote)
-        function_node = asttyped_rewriter.visit_quoted_function(function_node, embedded_function)
+        function_node = asttyped_rewriter.visit_quoted_function(function_node, embedded_function, remote_fn)
         function_node.flags = flags
 
         # Add it into our typedtree so that it gets inferenced and codegen'd.
@@ -1048,9 +1101,6 @@ class Stitcher:
         return function_node
 
     def _extract_annot(self, function, annot, kind, call_loc, fn_kind):
-        if annot is None:
-            annot = builtins.TNone()
-
         if isinstance(function, SpecializedFunction):
             host_function = function.host_function
         else:
@@ -1064,9 +1114,20 @@ class Stitcher:
         if isinstance(embedded_function, str):
             embedded_function = host_function
 
+        return self._to_artiq_type(
+            annot,
+            function=function,
+            kind=kind,
+            eval_in_scope=lambda x: eval(x, embedded_function.__globals__),
+            call_loc=call_loc,
+            fn_kind=fn_kind)
+
+    def _to_artiq_type(
+        self, annot, *, function, kind: str, eval_in_scope, call_loc: str, fn_kind: str
+    ) -> types.Type:
         if isinstance(annot, str):
             try:
-                annot = eval(annot, embedded_function.__globals__)
+                annot = eval_in_scope(annot)
             except Exception:
                 diag = diagnostic.Diagnostic(
                     "error",
@@ -1076,23 +1137,72 @@ class Stitcher:
                     notes=self._call_site_note(call_loc, fn_kind))
                 self.engine.process(diag)
 
-        if not isinstance(annot, types.Type):
-            diag = diagnostic.Diagnostic("error",
-                "type annotation for {kind}, '{annot}', is not an ARTIQ type",
-                {"kind": kind, "annot": repr(annot)},
-                self._function_loc(function),
-                notes=self._call_site_note(call_loc, fn_kind))
-            self.engine.process(diag)
-
-            return types.TVar()
-        else:
+        if isinstance(annot, types.Type):
             return annot
+
+        # Convert built-in Python types to ARTIQ ones.
+        if annot is None:
+            return builtins.TNone()
+        elif annot is numpy.int64:
+            return builtins.TInt64()
+        elif annot is numpy.int32:
+            return builtins.TInt32()
+        elif annot is float:
+            return builtins.TFloat()
+        elif annot is bool:
+            return builtins.TBool()
+        elif annot is str:
+            return builtins.TStr()
+        elif annot is bytes:
+            return builtins.TBytes()
+        elif annot is bytearray:
+            return builtins.TByteArray()
+
+        # Convert generic Python types to ARTIQ ones.
+        generic_ty = typing.get_origin(annot)
+        if generic_ty is not None:
+            type_args = typing.get_args(annot)
+            artiq_args = [
+                self._to_artiq_type(
+                    x,
+                    function=function,
+                    kind=kind,
+                    eval_in_scope=eval_in_scope,
+                    call_loc=call_loc,
+                    fn_kind=fn_kind)
+                for x in type_args
+            ]
+
+            if generic_ty is list and len(artiq_args) == 1:
+                return builtins.TList(artiq_args[0])
+            elif generic_ty is tuple:
+                return types.TTuple(artiq_args)
+
+        # Otherwise report an unknown type and just use a fresh tyvar.
+
+        if annot is int:
+            message = (
+                "type annotation for {kind}, 'int' cannot be used as an ARTIQ type. "
+                "Use numpy's int32 or int64 instead."
+            )
+            ty = builtins.TInt()
+        else:
+            message = "type annotation for {kind}, '{annot}', is not an ARTIQ type"
+            ty = types.TVar()
+
+        diag = diagnostic.Diagnostic("error",
+            message,
+            {"kind": kind, "annot": repr(annot)},
+            self._function_loc(function),
+            notes=self._call_site_note(call_loc, fn_kind))
+        self.engine.process(diag)
+
+        return ty
 
     def _quote_syscall(self, function, loc):
         signature = inspect.signature(function)
 
         arg_types = OrderedDict()
-        optarg_types = OrderedDict()
         for param in signature.parameters.values():
             if param.kind != inspect.Parameter.POSITIONAL_OR_KEYWORD:
                 diag = diagnostic.Diagnostic("error",
@@ -1127,6 +1237,40 @@ class Stitcher:
         function_type = types.TExternalFunction(arg_types, ret_type,
                                                 name=function.artiq_embedded.syscall,
                                                 flags=function.artiq_embedded.flags)
+        self.functions[function] = function_type
+        return function_type
+
+    def _quote_subkernel(self, function, loc):
+        if isinstance(function, SpecializedFunction):
+            host_function = function.host_function
+        else:
+            host_function = function
+        ret_type = builtins.TNone()
+        signature = inspect.signature(host_function)
+            
+        if signature.return_annotation is not inspect.Signature.empty:
+            ret_type = self._extract_annot(host_function, signature.return_annotation,
+                                            "return type", loc, fn_kind='subkernel')
+        arg_types = OrderedDict()
+        optarg_types = OrderedDict()
+        for param in signature.parameters.values():
+            if param.kind != inspect.Parameter.POSITIONAL_OR_KEYWORD:
+                diag = diagnostic.Diagnostic("error",
+                    "subkernels must only use positional arguments; '{argument}' isn't",
+                    {"argument": param.name},
+                    self._function_loc(function),
+                    notes=self._call_site_note(loc, fn_kind='subkernel'))
+                self.engine.process(diag)
+
+            arg_type = self._type_of_param(function, loc, param, fn_kind='subkernel')
+            if param.default is inspect.Parameter.empty:
+                arg_types[param.name] = arg_type
+            else:
+                optarg_types[param.name] = arg_type
+
+        function_type = types.TSubkernel(arg_types, optarg_types, ret_type,
+                                   sid=self.embedding_map.store_object(host_function),
+                                   destination=host_function.artiq_embedded.destination)
         self.functions[function] = function_type
         return function_type
 
@@ -1189,8 +1333,18 @@ class Stitcher:
                 (host_function.artiq_embedded.core_name is None and
                  host_function.artiq_embedded.portable is False and
                  host_function.artiq_embedded.syscall is None and
+                 host_function.artiq_embedded.destination is None and
                  host_function.artiq_embedded.forbidden is False):
             self._quote_rpc(function, loc)
+        elif host_function.artiq_embedded.destination is not None and \
+            host_function.artiq_embedded.destination != self.destination:
+            # treat subkernels as kernels if running on the same device
+            if not 0 < host_function.artiq_embedded.destination <= 255:
+                diag = diagnostic.Diagnostic("error",
+                    "subkernel destination must be between 1 and 255 (inclusive)", {},
+                    self._function_loc(host_function))
+                self.engine.process(diag)
+            self._quote_subkernel(function, loc)
         elif host_function.artiq_embedded.function is not None:
             if host_function.__name__ == "<lambda>":
                 note = diagnostic.Diagnostic("note",
@@ -1214,8 +1368,13 @@ class Stitcher:
                     notes=[note])
                 self.engine.process(diag)
 
+            destination = host_function.artiq_embedded.destination
+            # remote_fn only for first call in subkernels
+            remote_fn = destination is not None and self.first_call
             self._quote_embedded_function(function,
-                                          flags=host_function.artiq_embedded.flags)
+                                          flags=host_function.artiq_embedded.flags,
+                                          remote_fn=remote_fn)
+            self.first_call = False
         elif host_function.artiq_embedded.syscall is not None:
             # Insert a storage-less global whose type instructs the compiler
             # to perform a system call instead of a regular call.

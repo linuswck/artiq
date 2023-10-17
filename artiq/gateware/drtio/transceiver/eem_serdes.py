@@ -1,4 +1,5 @@
 from migen import *
+from migen.genlib.resetsync import AsyncResetSynchronizer
 from misoc.interconnect.csr import *
 from misoc.cores.code_8b10b import SingleEncoder, Decoder
 from artiq.gateware.drtio.core import TransceiverInterface, ChannelInterface
@@ -11,6 +12,7 @@ class RXSerdes(Module):
         self.cnt_in = [ Signal(5) for _ in range(4) ]
         self.cnt_out = [ Signal(5) for _ in range(4) ]
         self.bitslip = [ Signal() for _ in range(4) ]
+        self.o = [ Signal() for _ in range(4) ]
 
         ser_in_no_dly = [ Signal() for _ in range(4) ]
         ser_in = [ Signal() for _ in range(4) ]
@@ -34,6 +36,7 @@ class RXSerdes(Module):
                     o_Q6=self.rxdata[i][4],
                     o_Q7=self.rxdata[i][3],
                     o_Q8=self.rxdata[i][2],
+                    o_O=self.o[i],
                     o_SHIFTOUT1=shifts[i][0],
                     o_SHIFTOUT2=shifts[i][1],
                     i_DDLY=ser_in[i],
@@ -107,6 +110,8 @@ class TXSerdes(Module):
         ser_out = [ Signal() for _ in range(4) ]
         t_out = [ Signal() for _ in range(4) ]
 
+        self.ext_rst = Signal()
+
         for i in range(4):
             self.specials += [
                 # Serializer
@@ -116,7 +121,7 @@ class TXSerdes(Module):
                     p_INIT_OQ=0b00000,
                     o_OQ=ser_out[i],
                     o_TQ=t_out[i],
-                    i_RST=ResetSignal(),
+                    i_RST=ResetSignal() | self.ext_rst,
                     i_CLK=ClockSignal("sys5x"),
                     i_CLKDIV=ClockSignal(),
                     i_D1=self.txdata[i][0],
@@ -391,6 +396,81 @@ class SerdesSingle(Module):
                 & decoders[0].k))
 
 
+class OOBReset(Module):
+    def __init__(self, platform, iserdes_o):
+        self.clock_domains.cd_clk100 = ClockDomain()
+        self.specials += [
+            Instance("BUFR",
+                i_I=ClockSignal("clk200"),
+                o_O=ClockSignal("clk100"),
+                p_BUFR_DIVIDE="2"),
+            AsyncResetSynchronizer(self.cd_clk100, ResetSignal("clk200")),
+        ]
+
+        idle_low = Signal()
+        idle_high = Signal()
+
+        self.rst = Signal(reset=1)
+
+        # Detect the lack of transitions (idle) within a clk100 cycle
+        for idle, source in [
+                (idle_low, iserdes_o), (idle_high, ~iserdes_o)]:
+            idle_meta = Signal()
+            ff_pair = [ff1, ff2] = [
+                Instance("FDCE", p_INIT=1, i_D=1, i_CLR=source,
+                    i_CE=1, i_C=ClockSignal("clk100"), o_Q=idle_meta,
+                    attr={"async_reg"}),
+                Instance("FDCE", p_INIT=1, i_D=idle_meta, i_CLR=0,
+                    i_CE=1, i_C=ClockSignal("clk100"), o_Q=idle,
+                    attr={"async_reg"}),
+            ]
+            self.specials += ff_pair
+
+            platform.add_platform_command(
+                "set_false_path -quiet -to {ff1}/CLR", ff1=ff1)
+            # Capture transition detected by FF1/Q in FF2/D
+            platform.add_platform_command(
+                "set_max_delay 2 -quiet "
+                "-from {ff1}/Q -to {ff2}/D", ff1=ff1, ff2=ff2)
+
+        # Detect activity for the last 2**15 clk100 cycles
+        self.submodules.fsm = fsm = ClockDomainsRenamer("clk100")(
+            FSM(reset_state="WAIT_TRANSITION"))
+        counter = Signal(15, reset=0x7FFF)
+
+        # Keep sysclk reset asserted until transition is detected for a
+        # continuous 2**15 clk100 cycles
+        fsm.act("WAIT_TRANSITION",
+            self.rst.eq(1),
+            If(idle_low | idle_high,
+                NextValue(counter, 0x7FFF),
+            ).Else(
+                If(counter == 0,
+                    NextState("WAIT_NO_TRANSITION"),
+                    NextValue(counter, 0x7FFF),
+                ).Else(
+                    NextValue(counter, counter - 1),
+                )
+            )
+        )
+
+        # Reassert sysclk reset if there are no transition for the last 2**15
+        # clk100 cycles.
+        fsm.act("WAIT_NO_TRANSITION",
+            self.rst.eq(0),
+            If(idle_low | idle_high,
+                If(counter == 0,
+                    NextState("WAIT_TRANSITION"),
+                    NextValue(counter, 0x7FFF),
+                ).Else(
+                    NextValue(counter, counter - 1),
+                )
+            ).Else(
+                NextValue(counter, 0x7FFF),
+            )
+        )
+
+
 class EEMSerdes(Module, TransceiverInterface, AutoCSR):
     def __init__(self, platform, data_pads):
         self.rx_ready = CSRStorage()
@@ -472,10 +552,11 @@ class EEMSerdes(Module, TransceiverInterface, AutoCSR):
 
         self.submodules += serdes_list
 
-        TransceiverInterface.__init__(self, channel_interfaces)
+        self.submodules.oob_reset = OOBReset(platform, serdes_list[0].rx_serdes.o[0])
+        self.rst = self.oob_reset.rst
+        self.rst.attr.add("no_retiming")
 
-        for i in range(len(serdes_list)):
-            self.comb += [
-                getattr(self, "cd_rtio_rx" + str(i)).clk.eq(ClockSignal()),
-                getattr(self, "cd_rtio_rx" + str(i)).rst.eq(ResetSignal())
-            ]
+        TransceiverInterface.__init__(self, channel_interfaces, async_rx=False)
+
+        for tx_en, serdes in zip(self.txenable.storage, serdes_list):
+            self.comb += serdes.tx_serdes.ext_rst.eq(~tx_en)
