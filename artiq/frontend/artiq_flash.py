@@ -30,6 +30,7 @@ Valid actions:
     * firmware: write firmware to flash
     * load: load main gateware bitstream into device (volatile but fast)
     * erase: erase flash memory
+    * erase_storage: erase the storage flash sectors
     * start: trigger the target to (re)load its gateware bitstream from flash.
       If your core device is reachable by network, prefer 'artiq_coremgmt reboot'. 
 
@@ -146,6 +147,16 @@ class Programmer:
                      "flash probe {bankname}",
                      "flash erase_sector {bankname} 0 last",
                      bankname=bankname)
+
+    def erase_storage(self, bankname, start_address, end_address):
+        self.load_proxy()
+        size = end_address - start_address
+        add_commands(self._script,
+            "flash probe {bankname}",
+            "flash erase_sector {bankname} {firstsector} {lastsector}",
+            bankname=bankname,
+            firstsector=start_address // self._sector_size,
+            lastsector=(start_address + size - 1) // self._sector_size)
 
     def load(self, bitfile, pld):
         os.stat(bitfile) # check for existence
@@ -329,6 +340,8 @@ def main():
             programmer.start()
         elif action == "erase":
             programmer.erase_flash("spi0")
+        elif action == "erase_storage":
+            programmer.erase_storage(*config["storage"], config["firmware"][1])
         else:
             raise ValueError("invalid action", action)
 
