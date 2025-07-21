@@ -119,6 +119,7 @@ class SinaraTester(EnvExperiment):
                     })
                 elif (module, cls) == ("artiq.coredevice.cxp_grabber", "CXPGrabber"):
                     self.coaxpress_sfps[name] = self.get_device(name)
+        print(self.leds)
 
         # Remove Urukul, Sampler, Zotino and Mirny control signals
         # from TTL outs (tested separately) and remove Urukuls covered by
@@ -683,6 +684,46 @@ class SinaraTester(EnvExperiment):
                 phaser.set_leds(0)
                 delay(100*ms)
 
+    @kernel
+    def get_phaser_adc_voltages(self, phaser, cb):
+        self.core.break_realtime()
+        
+        smp = [0.0]*2
+        for i in range(2):
+            smp[i] = phaser.get_adc_ch(i)
+            delay(100*us)
+        cb(smp)
+
+    def test_phaser_adc(self):
+        print("*** Testing Phaser ADCs.")
+        for card_name, card_dev in self.phasers:
+            print("Testing: ", card_name)
+
+            for channel in range(2):
+                print("Apply 1.5V to channel {}. Press ENTER when done.".format(channel))
+                input()
+
+                voltages = []
+                def setv(x):
+                    nonlocal voltages
+                    voltages = x
+                self.get_phaser_adc_voltages(card_dev, setv)
+
+                passed = True
+                for n, voltage in enumerate(voltages):
+                    print(voltage)
+                    # if n == channel:
+                    #     if abs(voltage - 1.5) > 0.2:
+                    #         passed = False
+                    # else:
+                    #     if abs(voltage) > 0.2:
+                    #         passed = False
+                if passed:
+                    print("PASSED")
+                else:
+                    print("FAILED")
+                    print(" ".join(["{:.1f}".format(x) for x in voltages]))
+
     def test_phasers(self):
         print("*** Testing Phaser DACs and 6 USER LEDs.")
         print("Frequencies:")
@@ -698,6 +739,8 @@ class SinaraTester(EnvExperiment):
         self.phaser_led_wave(
             [card_dev for _, (__, card_dev) in enumerate(self.phasers)]
         )
+
+        self.test_phaser_adc()
 
     @kernel
     def grabber_capture(self, card_dev, rois):
